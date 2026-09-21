@@ -1,0 +1,91 @@
+name: Build BPM Application Document
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "bible"
+      - "build_bpm_application.py"
+      - "markdownall"
+      - "The_Sovereign_Crown_Master.txt"
+      - ".github/workflows/build-document.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-document:
+    name: Build and verify BPM document
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install document dependency
+        run: python -m pip install --upgrade python-docx
+
+      - name: Locate script and source
+        id: files
+        shell: bash
+        run: |
+          if [[ -f build_bpm_application.py ]]; then
+            script="build_bpm_application.py"
+          elif [[ -f bible ]]; then
+            script="bible"
+          else
+            echo "No BPM build script was found." >&2
+            exit 1
+          fi
+
+          if [[ -f The_Sovereign_Crown_Master.txt ]]; then
+            source="The_Sovereign_Crown_Master.txt"
+          elif [[ -f markdownall ]]; then
+            source="markdownall"
+          else
+            echo "No BPM source text was found." >&2
+            exit 1
+          fi
+
+          echo "script=$script" >> "$GITHUB_OUTPUT"
+          echo "source=$source" >> "$GITHUB_OUTPUT"
+          echo "Using script: $script" >> "$GITHUB_STEP_SUMMARY"
+          echo "Using source: $source" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Validate Python syntax
+        run: python -m py_compile "${{ steps.files.outputs.script }}"
+
+      - name: Build BPM application
+        run: |
+          python "${{ steps.files.outputs.script }}" \
+            "${{ steps.files.outputs.source }}" \
+            "The_Sovereign_Crown_BPM_Application.docx"
+
+      - name: Verify generated document
+        shell: bash
+        run: |
+          test -s The_Sovereign_Crown_BPM_Application.docx
+          python - <<'PY'
+          from docx import Document
+
+          path = "The_Sovereign_Crown_BPM_Application.docx"
+          document = Document(path)
+          if not document.paragraphs:
+              raise SystemExit("Generated document contains no paragraphs.")
+          print(f"Verified {path}: {len(document.paragraphs)} paragraphs")
+          PY
+
+      - name: Upload completed BPM document
+        uses: actions/upload-artifact@v4
+        with:
+          name: The-Sovereign-Crown-BPM-Application
+          path: The_Sovereign_Crown_BPM_Application.docx
+          if-no-files-found: error
+          retention-days: 30
