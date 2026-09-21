@@ -1,0 +1,516 @@
+#!/usr/bin/env python3
+"Build a clean Word edition of The Sovereign Crown BPM application.
+
+Usage:
+  python build_bpm_application.py SOURCE.txt OUTPUT.docx
+
+The script creates a submission-ready front section, a TikTok evidence index,
+and a cleaned, de-duplicated production appendix from the supplied master text.
+It does not invent URLs, awards, personnel, registrations, or verification.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import re
+import sys
+from pathlib import Path
+
+from docx import Document
+from docx.enum.section import WD_SECTION
+from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement, parse_xml
+from docx.oxml.ns import nsdecls
+from docx.oxml.ns import qn
+from docx.shared import Inches, Pt, RGBColor
+
+
+TITLE = "The Sovereign Crown"
+SUBTITLE = "Black Public Media Application and Production Portfolio"
+OWNER = "Clement Dynasty Dynasty Trust"
+PRESENTER = "State of Loc Nation Global Public Benefit Corporation"
+PRODUCTION_VENDOR = "In Da House Media Films"
+WEBSITE = "https://stateoflocnation.com"
+TIKTOK = "https://www.tiktok.com/@dynastyhealingcorp"
+
+
+def set_cell_shading(cell, fill: str) -> None:
+    tc_pr = cell._tc.get_or_add_tcPr()
+    shd = tc_pr.find(qn("w:shd"))
+    if shd is None:
+        shd = OxmlElement("w:shd")
+        tc_pr.append(shd)
+    shd.set(qn("w:fill"), fill)
+
+
+def set_cell_margins(cell, top=100, start=120, bottom=100, end=120) -> None:
+    tc = cell._tc
+    tc_pr = tc.get_or_add_tcPr()
+    tc_mar = tc_pr.first_child_found_in("w:tcMar")
+    if tc_mar is None:
+        tc_mar = OxmlElement("w:tcMar")
+        tc_pr.append(tc_mar)
+    for margin, value in (("top", top), ("start", start), ("bottom", bottom), ("end", end)):
+        node = tc_mar.find(qn(f"w:{margin}"))
+        if node is None:
+            node = OxmlElement(f"w:{margin}")
+            tc_mar.append(node)
+        node.set(qn("w:w"), str(value))
+        node.set(qn("w:type"), "dxa")
+
+
+def set_repeat_table_header(row) -> None:
+    tr_pr = row._tr.get_or_add_trPr()
+    tbl_header = OxmlElement("w:tblHeader")
+    tbl_header.set(qn("w:val"), "true")
+    tr_pr.append(tbl_header)
+
+
+def set_run_font(run, name="Aptos", size=11, bold=None, color="000000") -> None:
+    run.font.name = name
+    run._element.get_or_add_rPr().rFonts.set(qn("w:ascii"), name)
+    run._element.get_or_add_rPr().rFonts.set(qn("w:hAnsi"), name)
+    run.font.size = Pt(size)
+    if bold is not None:
+        run.bold = bold
+    run.font.color.rgb = RGBColor.from_string(color)
+
+
+def configure_document(doc: Document) -> None:
+    section = doc.sections[0]
+    section.page_width = Inches(8.5)
+    section.page_height = Inches(11)
+    section.top_margin = Inches(0.78)
+    section.bottom_margin = Inches(0.72)
+    section.left_margin = Inches(0.86)
+    section.right_margin = Inches(0.86)
+
+    styles = doc.styles
+    normal = styles["Normal"]
+    normal.font.name = "Aptos"
+    normal._element.rPr.rFonts.set(qn("w:ascii"), "Aptos")
+    normal._element.rPr.rFonts.set(qn("w:hAnsi"), "Aptos")
+    normal.font.size = Pt(10.5)
+    normal.font.color.rgb = RGBColor(0, 0, 0)
+    normal.paragraph_format.space_after = Pt(6)
+    normal.paragraph_format.line_spacing = 1.08
+
+    for name, size, before, after in (
+        ("Title", 25, 0, 10),
+        ("Subtitle", 13, 0, 16),
+        ("Heading 1", 16, 18, 7),
+        ("Heading 2", 12.5, 13, 5),
+        ("Heading 3", 11, 10, 4),
+    ):
+        style = styles[name]
+        style.font.name = "Aptos Display" if name != "Subtitle" else "Aptos"
+        style._element.rPr.rFonts.set(qn("w:ascii"), style.font.name)
+        style._element.rPr.rFonts.set(qn("w:hAnsi"), style.font.name)
+        style.font.size = Pt(size)
+        style.font.color.rgb = RGBColor(0, 0, 0)
+        style.font.bold = name != "Subtitle"
+        style.paragraph_format.space_before = Pt(before)
+        style.paragraph_format.space_after = Pt(after)
+        style.paragraph_format.keep_with_next = True
+
+    footer = section.footer
+    p = footer.paragraphs[0]
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run("Property of Clement Dynasty Dynasty Trust | Presented by State of Loc Nation GPBC")
+    set_run_font(r, size=8, color="666666")
+    add_watermark(section, "CONFIDENTIAL - PROPERTY OF CLEMENT DYNASTY DYNASTY TRUST")
+
+
+def add_watermark(section, text: str) -> None:
+    """Add a faint diagonal Word VML text watermark to the section header."""
+    header = section.header
+    paragraph = header.paragraphs[0]
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    watermark = parse_xml(
+        f'''<w:r {nsdecls("w")} xmlns:v="urn:schemas-microsoft-com:vml"
+          xmlns:o="urn:schemas-microsoft-com:office:office">
+          <w:pict>
+            <v:shapetype id="_x0000_t136" coordsize="21600,21600" o:spt="136"
+              adj="10800" path="m@7,l@8,m@5,21600l@6,21600e">
+              <v:formulas>
+                <v:f eqn="sum #0 0 10800"/><v:f eqn="prod #0 2 1"/>
+                <v:f eqn="sum 21600 0 @1"/><v:f eqn="sum 0 0 @2"/>
+                <v:f eqn="sum 21600 0 @3"/><v:f eqn="if @0 @3 0"/>
+                <v:f eqn="if @0 21600 @1"/><v:f eqn="if @0 0 @2"/>
+                <v:f eqn="if @0 @4 21600"/><v:f eqn="mid @5 @6"/>
+                <v:f eqn="mid @8 @5"/><v:f eqn="mid @7 @8"/>
+                <v:f eqn="mid @6 @7"/><v:f eqn="sum @6 0 @5"/>
+              </v:formulas>
+              <v:path textpathok="t" o:connecttype="custom"
+                o:connectlocs="@9,0;@10,10800;@11,21600;@12,10800"
+                o:connectangles="270,180,90,0"/>
+              <v:textpath on="t" fitshape="t"/>
+              <o:lock v:ext="edit" text="t" shapetype="t"/>
+            </v:shapetype>
+            <v:shape id="PowerPlusWaterMarkObject" o:spid="_x0000_s2049"
+              type="#_x0000_t136"
+              style="position:absolute;margin-left:0;margin-top:0;width:520pt;height:115pt;
+                rotation:315;z-index:-251654144;mso-wrap-edited:f;
+                mso-position-horizontal:center;mso-position-horizontal-relative:margin;
+                mso-position-vertical:center;mso-position-vertical-relative:margin"
+              fillcolor="#B7B7B7" stroked="f">
+              <v:fill opacity=".14"/>
+              <v:textpath style="font-family:Aptos;font-size:1pt;font-weight:bold"
+                string="{text}"/>
+            </v:shape>
+          </w:pict>
+        </w:r>'''
+    )
+    paragraph._p.append(watermark)
+
+
+def add_page_number(paragraph) -> None:
+    paragraph.add_run(" | Page ")
+    run_begin = OxmlElement("w:r")
+    fld_char1 = OxmlElement("w:fldChar")
+    fld_char1.set(qn("w:fldCharType"), "begin")
+    run_begin.append(fld_char1)
+    run_instr = OxmlElement("w:r")
+    instr_text = OxmlElement("w:instrText")
+    instr_text.set(qn("xml:space"), "preserve")
+    instr_text.text = " PAGE "
+    run_instr.append(instr_text)
+    run_sep = OxmlElement("w:r")
+    fld_sep = OxmlElement("w:fldChar")
+    fld_sep.set(qn("w:fldCharType"), "separate")
+    run_sep.append(fld_sep)
+    page_run = OxmlElement("w:r")
+    page_text = OxmlElement("w:t")
+    page_text.text = "1"
+    page_run.append(page_text)
+    run_end = OxmlElement("w:r")
+    fld_char2 = OxmlElement("w:fldChar")
+    fld_char2.set(qn("w:fldCharType"), "end")
+    run_end.append(fld_char2)
+    paragraph._p.append(run_begin)
+    paragraph._p.append(run_instr)
+    paragraph._p.append(run_sep)
+    paragraph._p.append(page_run)
+    paragraph._p.append(run_end)
+
+
+def add_cover(doc: Document) -> None:
+    p = doc.add_paragraph()
+    p.add_run("\n\n")
+    p = doc.add_paragraph(style="Title")
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.add_run(TITLE)
+    p = doc.add_paragraph(style="Subtitle")
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.add_run(SUBTITLE)
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    for line in (
+        f"Presented by {PRESENTER}",
+        f"Property of {OWNER}",
+        f"Production services by {PRODUCTION_VENDOR}",
+        "Prepared for Black Public Media review",
+        "September 2026",
+    ):
+        r = p.add_run(line + "\n")
+        set_run_font(r, size=11.5, bold=line.startswith("Presented by"))
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run("Application responses, project plan, work sample guide, budget, and production appendix")
+    set_run_font(r, size=10, color="555555")
+    doc.add_page_break()
+
+
+def add_intro(doc: Document) -> None:
+    doc.add_heading("Application overview", level=1)
+    doc.add_paragraph(
+        "The Sovereign Crown is a proposed prestige limited dramatic series that combines mythic storytelling, "
+        "community-rooted salon culture, public-record advocacy, and a speculative financial thriller. The project "
+        "centers a Black woman leader whose work moves between the intimate setting of a community hair-care temple "
+        "and the institutional settings where policy, law, technology, and capital are contested."
+    )
+    doc.add_heading("Controlling ownership and production services statement", level=2)
+    doc.add_paragraph(
+        f"{TITLE} is the property of {OWNER} and is presented by {PRESENTER}. "
+        f"{PRODUCTION_VENDOR} is retained solely as the hired production-services vendor for craft execution under "
+        "a work-for-hire arrangement. The production-services vendor does not acquire ownership, copyright, "
+        "trademark rights, or equity in the project. If any historical draft language in the production archive "
+        "conflicts with this statement, this controlling statement governs."
+    )
+    doc.add_paragraph(
+        "This edition separates the application answers from the longer creative and production archive. Statements "
+        "about financial networks, settlements, institutional recognition, legal outcomes, audience size, attached "
+        "personnel, and third-party verification must be supported with current documentation before submission. "
+        "Dramatized or speculative elements are identified as part of the story world rather than represented as "
+        "independently verified facts."
+    )
+
+
+APPLICATION_RESPONSES = [
+    ("Project title", TITLE),
+    ("Applicant, owner, presenter, and production services", f"Presented by {PRESENTER}. Property of {OWNER}. {PRODUCTION_VENDOR} serves only as the hired production-services vendor for craft execution under a work-for-hire arrangement."),
+    ("Format and stage", "Prestige limited dramatic series. The supplied materials include a pilot opening, episode architecture, visual strategy, production planning, budgets, pitch language, contracts, and campaign concepts. Confirm the precise production stage and completed work sample before submission."),
+    ("Primary logline", "Across a story spanning ancient memory and the present day, a Black community loctician and civic organizer confronts the inherited machinery of economic exclusion. Working from a neighborhood hair-care temple and aided by a mysterious digital architect, she turns legal literacy, public storytelling, and collective action into a campaign for community self-determination."),
+    ("Short synopsis", "The Sovereign Crown follows Rev. Dr. Christina Clement, a community loctician, organizer, and media maker whose salon serves as a sanctuary, classroom, and command center. When conventional political and media systems fail to hear her community, she builds a public-facing campaign grounded in historical memory, administrative literacy, and digital communication. A parallel mythic narrative casts her as the continuation of an ancient vow to confront a centuries-long cycle of exclusion. Her collaborator Kaelen operates at the edge of character and system: a quiet digital presence whose nature unfolds over the series. The drama moves between warm, intimate salon scenes and cold institutional environments, asking what sovereignty, accountability, and repair mean when communities create their own language for power."),
+    ("Project description", "The series uses a character-driven thriller structure to explore redlining, media exclusion, administrative systems, community economics, and the cultural meaning of Black hair. Rather than treating community members only as recipients of harm, the story presents them as researchers, builders, witnesses, and decision-makers. The project draws from the creator's public advocacy, campaign media, legal research, and community work while using dramatization to distinguish narrative invention from documentary proof."),
+    ("Director and creator statement", "I am creating The Sovereign Crown because the places where Black communities care for one another are also places where history, policy, identity, and economic survival are discussed in practical terms. The hair-care temple is not background scenery. It is a living civic space. I want the audience to experience the tension between that warm human environment and the distant systems that assign value, credibility, and access. The series uses myth, legal language, political media, and speculative technology to translate complex questions into a story about who is heard, who is believed, and who is permitted to design the future."),
+    ("Connection to Black audiences", "The project is rooted in Black community spaces and in the continuing effects of redlining, underinvestment, unequal media access, and administrative barriers. Its central creative choice is to show Black people not only naming those conditions but also studying them, documenting them, building responses, and debating the responsibilities that come with collective power."),
+    ("Creative and visual approach", "The visual language contrasts two worlds. Salon and community scenes use warm amber light, textured close-ups, shallow depth of field, and patient camera movement. Institutional and digital sequences use cooler blue and neutral tones, rigid geometry, split screens, and precise interface imagery. The sound design moves between the intimate rhythms of the salon, ancestral percussion, and restrained orchestral tension. Legal and technical language is used selectively and translated through character stakes so clarity is never sacrificed for terminology."),
+    ("Feasibility and readiness", "The source package provides a detailed creative concept, initial scripts, episode outlines, visual references, schedules, and two budget scenarios. Before production funds are committed, the applicant should attach named key personnel, current resumes, chain-of-title documents, rights and appearance releases, insurance estimates, vendor quotes, a finalized schedule, and a confirmed work-sample link."),
+    ("Audience and impact strategy", f"The initial audience strategy combines community screenings, facilitated discussions, short-form explanatory videos, festival submissions, and the production's existing social channels. The public project portal is {WEBSITE}; the identified TikTok profile is {TIKTOK}. Each video used as application evidence should be linked individually and labeled by date, title, relevance, and rights status."),
+    ("Distribution strategy", "The project will pursue a staged path: an application work sample and proof of concept; community and partner screenings; targeted Black media and public-media outreach; appropriate festivals and industry forums; and conversations with distributors or platforms after a rights-cleared fine cut exists. Festival names, broadcaster interest, and platform participation should not be described as secured unless confirmed in writing."),
+    ("Rights and clearances", "The applicant states that the underlying project is controlled by the named production and corporate entities and cites LCCN 2025901437. Prior to submission or distribution, counsel or a qualified clearance professional should confirm copyright ownership, life-story and archival rights, music licenses, trademarks, releases, chain of title, errors-and-omissions requirements, and the permitted use of court or public-record materials."),
+]
+
+
+def add_application_answers(doc: Document) -> None:
+    doc.add_heading("BPM application responses", level=1)
+    for question, answer in APPLICATION_RESPONSES:
+        doc.add_heading(question, level=2)
+        doc.add_paragraph(answer)
+
+
+def add_schedule(doc: Document) -> None:
+    doc.add_heading("Production schedule", level=1)
+    rows = [
+        ("Application preparation", "September to October 2026", "Finalize answers, permissions, work sample, biographies, budget, and links."),
+        ("Preproduction", "October to December 2026", "Confirm creative team, locations, releases, insurance, production plan, and technical tests."),
+        ("Principal photography", "Schedule to be confirmed", "Film the proof of concept and priority community sequences after funding and crew confirmation."),
+        ("Postproduction", "Four to five months after photography", "Picture edit, sound, music, graphics, accessibility, legal review, and final delivery."),
+        ("Community and industry launch", "After final delivery", "Screenings, discussion materials, press outreach, festivals, and distribution conversations."),
+    ]
+    add_table(doc, ["Phase", "Working window", "Deliverables"], rows, [1.55, 1.55, 3.55])
+
+
+def add_budget(doc: Document) -> None:
+    doc.add_heading("Phase one budget", level=1)
+    rows = [
+        ("Preproduction and chain of title", "$3,500", "In-house equity"),
+        ("Camera and lens rentals", "$7,000", "Requested grant"),
+        ("Location sound", "$4,500", "Requested grant"),
+        ("Crew and hair and makeup", "$12,000", "Match and grassroots support"),
+        ("Editing and postproduction", "$5,500", "Requested grant"),
+        ("Original score", "$6,500", "Grassroots or fiscal sponsorship"),
+        ("Legal and errors and omissions", "$3,000", "In-house equity"),
+        ("Total", "$42,000", "$20,000 request; $15,000 proposed equity; $7,000 proposed grassroots support"),
+    ]
+    add_table(doc, ["Category", "Amount", "Proposed source"], rows, [3.0, 1.0, 2.65])
+    doc.add_paragraph(
+        "Budget note: The source package also contains a later $150,000 expansion scenario. It should be presented "
+        "as a separate future phase, not combined with the $42,000 phase-one budget. All match commitments and "
+        "vendor estimates require supporting documentation."
+    )
+
+
+def add_table(doc: Document, headers, rows, widths) -> None:
+    table = doc.add_table(rows=1, cols=len(headers))
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.style = "Table Grid"
+    hdr = table.rows[0]
+    set_repeat_table_header(hdr)
+    for i, label in enumerate(headers):
+        cell = hdr.cells[i]
+        cell.width = Inches(widths[i])
+        set_cell_shading(cell, "1F4E78")
+        set_cell_margins(cell)
+        cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+        p = cell.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r = p.add_run(label)
+        set_run_font(r, size=9, bold=True, color="FFFFFF")
+    for ridx, row in enumerate(rows):
+        cells = table.add_row().cells
+        for i, value in enumerate(row):
+            cells[i].width = Inches(widths[i])
+            set_cell_margins(cells[i])
+            cells[i].vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+            if ridx % 2:
+                set_cell_shading(cells[i], "F3F6F8")
+            p = cells[i].paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER if i == 1 else WD_ALIGN_PARAGRAPH.LEFT
+            r = p.add_run(str(value))
+            set_run_font(r, size=8.7, bold=(ridx == len(rows) - 1 and str(row[0]).lower() == "total"))
+    doc.add_paragraph()
+
+
+def add_video_index(doc: Document) -> None:
+    doc.add_heading("TikTok work sample and evidence index", level=1)
+    doc.add_paragraph(
+        f"Verified public profile: {TIKTOK}. The supplied master document names the profile but does not provide "
+        "individual TikTok post URLs. Insert the exact public URL for each selected video before submitting. Use "
+        "only videos owned or licensed by the applicant and confirm that reviewers can open them without logging in."
+    )
+    rows = [
+        ("Community setting and creator voice", "Director statement; connection to Black audiences", "Insert exact TikTok video URL", "Shows the salon or community space and the creator speaking in her own voice."),
+        ("Redlining and underinvestment", "Project need and impact", "Insert exact TikTok video URL", "Connects historical or present-day exclusion to the project's central question."),
+        ("Hair, culture, and the Nazirite theme", "Creative approach; character world", "Insert exact TikTok video URL", "Supports the visual and cultural role of the hair-care temple."),
+        ("Public campaign or speech excerpt", "Audience engagement; media strategy", "Insert exact TikTok video URL", "Demonstrates on-camera presence and short-form storytelling."),
+        ("Administrative or legal education", "Subject expertise; story research", "Insert exact TikTok video URL", "Shows how complex material is explained to a public audience."),
+        ("LND or community economics explanation", "Thematic context only", "Insert exact TikTok video URL", "Label as advocacy, proposal, or dramatized concept unless independently documented."),
+    ]
+    add_table(doc, ["Video topic", "Application section", "Required link", "Reviewer note"], rows, [1.45, 1.55, 1.65, 2.0])
+    doc.add_heading("Video selection checklist", level=2)
+    for item in (
+        "Use a direct post URL, not the TikTok home page or profile page alone.",
+        "Record the post title, posting date, duration, and creator account.",
+        "Confirm music, images, participant appearances, and locations are cleared for application review.",
+        "Add captions or a transcript and identify the strongest 30- to 90-second excerpt.",
+        "Remove or qualify statements that cannot be substantiated by the application record.",
+        "Keep a downloaded archival copy and a reviewer-accessible backup link if permitted.",
+    ):
+        doc.add_paragraph(item, style="List Bullet")
+
+
+def add_work_sample(doc: Document) -> None:
+    doc.add_heading("Five minute visual work sample guide", level=1)
+    rows = [
+        ("0:00 to 1:30", "The sanctuary", "An uninterrupted movement through the hair-care temple introduces the creator, community, and warm visual palette."),
+        ("1:30 to 3:30", "The network switch", "A split-screen transition contrasts the salon with a cool digital workspace and introduces Kaelen as part of the drama's speculative structure."),
+        ("3:30 to 5:00", "The public pivot", "A montage connects research, community conversations, campaign media, and the questions of value and access that drive the series."),
+    ]
+    add_table(doc, ["Time", "Sequence", "Purpose"], rows, [1.1, 1.55, 4.0])
+    doc.add_paragraph(
+        "Do not display unverified live transaction confirmations, third-party institutional acceptance, or audience "
+        "counts as factual proof. If those images are retained, identify them on screen as dramatization, concept art, "
+        "or a proposed interface."
+    )
+
+
+def clean_line(line: str) -> str:
+    line = line.replace("\ufeff", "").strip()
+    line = re.sub(r"^[🎬📋👥💰🔍🔒📁📰📱📸]+\s*", "", line)
+    line = re.sub(r"(?<!https)(?<!http)://stateoflocnation\.com", WEBSITE, line)
+    line = line.replace("httpshttps://", "https://")
+    line = re.sub(r"^\*\s*\*\s*", "", line)
+    line = re.sub(r"^\*\s+", "", line)
+    line = re.sub(r"_{6,}", "", line)
+    return line.strip()
+
+
+def remove_assistant_prompt(text: str) -> str:
+    """Remove conversational drafting prompts that are not portfolio content."""
+    patterns = (
+        r"\bWould you like me\b",
+        r"\bwould you like me\b",
+        r"\bLet me know if you would like me\b",
+        r"\bNow that the .*? let me know\b",
+        r"\bPlease confirm if you are ready\b",
+        r"\bPlease let me know if you would like\b",
+    )
+    cut = len(text)
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.I)
+        if match:
+            cut = min(cut, match.start())
+    return text[:cut].strip()
+
+
+def split_sections(raw: str):
+    lines = raw.replace("\r\n", "\n").split("\n")
+    sections = []
+    title = "Source opening material"
+    body = []
+    for original in lines:
+        line = clean_line(original)
+        if re.match(r"^(SECTION\s+\d+|PART\s+\d+|PROJECT PROFILE|PROJECT REFERENCE|THE SOVEREIGN CROWN:)", line, re.I):
+            if any(x.strip() for x in body):
+                sections.append((title, body))
+            title = line.title() if line.isupper() else line
+            body = []
+        else:
+            body.append(line)
+    if any(x.strip() for x in body):
+        sections.append((title, body))
+    return sections
+
+
+def normalized_section(title, body) -> str:
+    text = title + "\n" + "\n".join(body)
+    return re.sub(r"\W+", "", text).lower()
+
+
+def add_archive(doc: Document, raw: str) -> None:
+    doc.add_page_break()
+    doc.add_heading("Production and creative archive", level=1)
+    doc.add_paragraph(
+        "The following appendix preserves the substantive creative and production material from the supplied master "
+        "text while removing exact repeated sections, separator lines, emoji markers, and conversational prompts. "
+        "Template agreements and legal language remain working drafts and require professional review before use."
+    )
+    seen = set()
+    kept = 0
+    for title, body in split_sections(raw):
+        normalized = normalized_section(title, body)
+        digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+        if digest in seen or len(normalized) < 80:
+            continue
+        seen.add(digest)
+        kept += 1
+        doc.add_heading(title[:180], level=2)
+        paragraph_buffer = []
+        for line in body:
+            if not line:
+                if paragraph_buffer:
+                    paragraph = remove_assistant_prompt(" ".join(paragraph_buffer))
+                    if paragraph:
+                        doc.add_paragraph(paragraph)
+                    paragraph_buffer = []
+                continue
+            if re.match(r"^(ACT|SCENE|EPISODE|INT\.|EXT\.|FADE|TITLE:|LOGLINE|SYNOPSIS|OBJECTIVE|BUDGET|TOTAL|MEDIA CONTACT)", line, re.I) and len(line) < 150:
+                if paragraph_buffer:
+                    paragraph = remove_assistant_prompt(" ".join(paragraph_buffer))
+                    if paragraph:
+                        doc.add_paragraph(paragraph)
+                    paragraph_buffer = []
+                p = doc.add_paragraph()
+                r = p.add_run(line)
+                set_run_font(r, size=9.5, bold=True)
+            elif re.match(r"^[-•]\s+", line) or re.match(r"^\d+[.)]\s+", line):
+                if paragraph_buffer:
+                    paragraph = remove_assistant_prompt(" ".join(paragraph_buffer))
+                    if paragraph:
+                        doc.add_paragraph(paragraph)
+                    paragraph_buffer = []
+                doc.add_paragraph(re.sub(r"^[-•]\s+", "", line), style="List Bullet")
+            else:
+                paragraph_buffer.append(line)
+        if paragraph_buffer:
+            paragraph = remove_assistant_prompt(" ".join(paragraph_buffer))
+            if paragraph:
+                doc.add_paragraph(paragraph)
+    doc.add_paragraph(f"Archive assembly note: {kept} non-empty source sections were retained after exact de-duplication.")
+
+
+def finalize_footer(doc: Document) -> None:
+    for section in doc.sections:
+        footer = section.footer
+        p = footer.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        if not p.text:
+            r = p.add_run("Property of Clement Dynasty Dynasty Trust | Presented by State of Loc Nation GPBC")
+            set_run_font(r, size=8, color="666666")
+        add_page_number(p)
+
+
+def build(source: Path, output: Path) -> None:
+    raw = source.read_text(encoding="utf-8-sig", errors="replace")
+    doc = Document()
+    configure_document(doc)
+    add_cover(doc)
+    add_intro(doc)
+    add_application_answers(doc)
+    add_schedule(doc)
+    add_budget(doc)
+    add_work_sample(doc)
+    add_video_index(doc)
+    add_archive(doc, raw)
+    finalize_footer(doc)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    doc.save(output)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        raise SystemExit("Usage: python build_bpm_application.py SOURCE.txt OUTPUT.docx")
+    build(Path(sys.argv[1]), Path(sys.argv[2]))
