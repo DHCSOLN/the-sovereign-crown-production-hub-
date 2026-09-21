@@ -1,0 +1,132 @@
+name: OpenShift Readiness and Deployment
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/openshift.yml"
+      - "Dockerfile"
+      - "Containerfile"
+      - "app/**"
+      - "src/**"
+      - "requirements.txt"
+      - "package.json"
+      - "package-lock.json"
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  OPENSHIFT_SERVER: ${{ secrets.OPENSHIFT_SERVER }}
+  OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
+  OPENSHIFT_NAMESPACE: ${{ secrets.OPENSHIFT_NAMESPACE }}
+  APP_NAME: sovereign-crown-production-hub
+  APP_PORT: "8080"
+  IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}
+  IMAGE_REGISTRY_USER: ${{ github.actor }}
+  IMAGE_REGISTRY_PASSWORD: ${{ github.token }}
+
+jobs:
+  openshift:
+    name: Check readiness and deploy when configured
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check OpenShift readiness
+        id: readiness
+        shell: bash
+        run: |
+          ready=true
+
+          if [[ -z "$OPENSHIFT_SERVER" ]]; then
+            echo "OPENSHIFT_SERVER is not configured." >> "$GITHUB_STEP_SUMMARY"
+            ready=false
+          fi
+
+          if [[ -z "$OPENSHIFT_TOKEN" ]]; then
+            echo "OPENSHIFT_TOKEN is not configured." >> "$GITHUB_STEP_SUMMARY"
+            ready=false
+          fi
+
+          if [[ ! -f Dockerfile && ! -f Containerfile ]]; then
+            echo "No Dockerfile or Containerfile exists yet." >> "$GITHUB_STEP_SUMMARY"
+            ready=false
+          fi
+
+          if [[ "$ready" == "true" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "OpenShift prerequisites are present. Deployment will continue." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "OpenShift deployment was safely skipped. This is a readiness result, not a deployment." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Determine image tags
+        if: steps.readiness.outputs.ready == 'true'
+        shell: bash
+        run: echo "IMAGE_TAGS=latest ${GITHUB_SHA::12}" >> "$GITHUB_ENV"
+
+      - name: Build container image
+        if: steps.readiness.outputs.ready == 'true'
+        id: build-image
+        uses: redhat-actions/buildah-build@v2
+        with:
+          image: ${{ env.APP_NAME }}
+          tags: ${{ env.IMAGE_TAGS }}
+          containerfiles: |
+            ${{ hashFiles('Containerfile') != '' && './Containerfile' || './Dockerfile' }}
+
+      - name: Push image to GHCR
+        if: steps.readiness.outputs.ready == 'true'
+        id: push-image
+        uses: redhat-actions/push-to-registry@v2
+        with:
+          image: ${{ steps.build-image.outputs.image }}
+          tags: ${{ steps.build-image.outputs.tags }}
+          registry: ${{ env.IMAGE_REGISTRY }}
+          username: ${{ env.IMAGE_REGISTRY_USER }}
+          password: ${{ env.IMAGE_REGISTRY_PASSWORD }}
+
+      - name: Install OpenShift CLI
+        if: steps.readiness.outputs.ready == 'true'
+        uses: redhat-actions/openshift-tools-installer@v1
+        with:
+          oc: "4"
+
+      - name: Log in to OpenShift
+        if: steps.readiness.outputs.ready == 'true'
+        uses: redhat-actions/oc-login@v1
+        with:
+          openshift_server_url: ${{ env.OPENSHIFT_SERVER }}
+          openshift_token: ${{ env.OPENSHIFT_TOKEN }}
+          insecure_skip_tls_verify: true
+          namespace: ${{ env.OPENSHIFT_NAMESPACE }}
+
+      - name: Create and expose application
+        if: steps.readiness.outputs.ready == 'true'
+        id: deploy
+        uses: redhat-actions/oc-new-app@v1
+        with:
+          app_name: ${{ env.APP_NAME }}
+          image: ${{ steps.push-image.outputs.registry-path }}
+          namespace: ${{ env.OPENSHIFT_NAMESPACE }}
+          port: ${{ env.APP_PORT }}
+
+      - name: Report deployment URL
+        if: steps.readiness.outputs.ready == 'true'
+        env:
+          ROUTE: ${{ steps.deploy.outputs.route }}
+        shell: bash
+        run: |
+          if [[ -z "$ROUTE" ]]; then
+            echo "OpenShift did not return an application route." >&2
+            exit 1
+          fi
+          echo "Application URL: $ROUTE" >> "$GITHUB_STEP_SUMMARY"
