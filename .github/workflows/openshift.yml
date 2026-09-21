@@ -1,4 +1,4 @@
-name: OpenShift Readiness and Deployment
+name: Build BPM Application Document
 
 on:
   workflow_dispatch:
@@ -6,127 +6,86 @@ on:
     branches:
       - main
     paths:
-      - ".github/workflows/openshift.yml"
-      - "Dockerfile"
-      - "Containerfile"
-      - "app/**"
-      - "src/**"
-      - "requirements.txt"
-      - "package.json"
-      - "package-lock.json"
+      - "bible"
+      - "build_bpm_application.py"
+      - "markdownall"
+      - "The_Sovereign_Crown_Master.txt"
+      - ".github/workflows/build-document.yml"
 
 permissions:
   contents: read
-  packages: write
-
-env:
-  OPENSHIFT_SERVER: ${{ secrets.OPENSHIFT_SERVER }}
-  OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
-  OPENSHIFT_NAMESPACE: ${{ secrets.OPENSHIFT_NAMESPACE }}
-  APP_NAME: sovereign-crown-production-hub
-  APP_PORT: "8080"
-  IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}
-  IMAGE_REGISTRY_USER: ${{ github.actor }}
-  IMAGE_REGISTRY_PASSWORD: ${{ github.token }}
 
 jobs:
-  openshift:
-    name: Check readiness and deploy when configured
+  build-document:
+    name: Build and verify BPM document
     runs-on: ubuntu-latest
-    environment: production
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Check OpenShift readiness
-        id: readiness
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install document dependency
+        run: python -m pip install --upgrade python-docx
+
+      - name: Locate script and source
+        id: files
         shell: bash
         run: |
-          ready=true
-
-          if [[ -z "$OPENSHIFT_SERVER" ]]; then
-            echo "OPENSHIFT_SERVER is not configured." >> "$GITHUB_STEP_SUMMARY"
-            ready=false
-          fi
-
-          if [[ -z "$OPENSHIFT_TOKEN" ]]; then
-            echo "OPENSHIFT_TOKEN is not configured." >> "$GITHUB_STEP_SUMMARY"
-            ready=false
-          fi
-
-          if [[ ! -f Dockerfile && ! -f Containerfile ]]; then
-            echo "No Dockerfile or Containerfile exists yet." >> "$GITHUB_STEP_SUMMARY"
-            ready=false
-          fi
-
-          if [[ "$ready" == "true" ]]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-            echo "OpenShift prerequisites are present. Deployment will continue." >> "$GITHUB_STEP_SUMMARY"
+          if [[ -f build_bpm_application.py ]]; then
+            script="build_bpm_application.py"
+          elif [[ -f bible ]]; then
+            script="bible"
           else
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "OpenShift deployment was safely skipped. This is a readiness result, not a deployment." >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Determine image tags
-        if: steps.readiness.outputs.ready == 'true'
-        shell: bash
-        run: echo "IMAGE_TAGS=latest ${GITHUB_SHA::12}" >> "$GITHUB_ENV"
-
-      - name: Build container image
-        if: steps.readiness.outputs.ready == 'true'
-        id: build-image
-        uses: redhat-actions/buildah-build@v2
-        with:
-          image: ${{ env.APP_NAME }}
-          tags: ${{ env.IMAGE_TAGS }}
-          containerfiles: |
-            ${{ hashFiles('Containerfile') != '' && './Containerfile' || './Dockerfile' }}
-
-      - name: Push image to GHCR
-        if: steps.readiness.outputs.ready == 'true'
-        id: push-image
-        uses: redhat-actions/push-to-registry@v2
-        with:
-          image: ${{ steps.build-image.outputs.image }}
-          tags: ${{ steps.build-image.outputs.tags }}
-          registry: ${{ env.IMAGE_REGISTRY }}
-          username: ${{ env.IMAGE_REGISTRY_USER }}
-          password: ${{ env.IMAGE_REGISTRY_PASSWORD }}
-
-      - name: Install OpenShift CLI
-        if: steps.readiness.outputs.ready == 'true'
-        uses: redhat-actions/openshift-tools-installer@v1
-        with:
-          oc: "4"
-
-      - name: Log in to OpenShift
-        if: steps.readiness.outputs.ready == 'true'
-        uses: redhat-actions/oc-login@v1
-        with:
-          openshift_server_url: ${{ env.OPENSHIFT_SERVER }}
-          openshift_token: ${{ env.OPENSHIFT_TOKEN }}
-          insecure_skip_tls_verify: true
-          namespace: ${{ env.OPENSHIFT_NAMESPACE }}
-
-      - name: Create and expose application
-        if: steps.readiness.outputs.ready == 'true'
-        id: deploy
-        uses: redhat-actions/oc-new-app@v1
-        with:
-          app_name: ${{ env.APP_NAME }}
-          image: ${{ steps.push-image.outputs.registry-path }}
-          namespace: ${{ env.OPENSHIFT_NAMESPACE }}
-          port: ${{ env.APP_PORT }}
-
-      - name: Report deployment URL
-        if: steps.readiness.outputs.ready == 'true'
-        env:
-          ROUTE: ${{ steps.deploy.outputs.route }}
-        shell: bash
-        run: |
-          if [[ -z "$ROUTE" ]]; then
-            echo "OpenShift did not return an application route." >&2
+            echo "No BPM build script was found." >&2
             exit 1
           fi
-          echo "Application URL: $ROUTE" >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ -f The_Sovereign_Crown_Master.txt ]]; then
+            source="The_Sovereign_Crown_Master.txt"
+          elif [[ -f markdownall ]]; then
+            source="markdownall"
+          else
+            echo "No BPM source text was found." >&2
+            exit 1
+          fi
+
+          echo "script=$script" >> "$GITHUB_OUTPUT"
+          echo "source=$source" >> "$GITHUB_OUTPUT"
+          echo "Using script: $script" >> "$GITHUB_STEP_SUMMARY"
+          echo "Using source: $source" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Validate Python syntax
+        run: python -m py_compile "${{ steps.files.outputs.script }}"
+
+      - name: Build BPM application
+        run: |
+          python "${{ steps.files.outputs.script }}" \
+            "${{ steps.files.outputs.source }}" \
+            "The_Sovereign_Crown_BPM_Application.docx"
+
+      - name: Verify generated document
+        shell: bash
+        run: |
+          test -s The_Sovereign_Crown_BPM_Application.docx
+          python - <<'PY'
+          from docx import Document
+
+          path = "The_Sovereign_Crown_BPM_Application.docx"
+          document = Document(path)
+          if not document.paragraphs:
+              raise SystemExit("Generated document contains no paragraphs.")
+          print(f"Verified {path}: {len(document.paragraphs)} paragraphs")
+          PY
+
+      - name: Upload completed BPM document
+        uses: actions/upload-artifact@v4
+        with:
+          name: The-Sovereign-Crown-BPM-Application
+          path: The_Sovereign_Crown_BPM_Application.docx
+          if-no-files-found: error
+          retention-days: 30
