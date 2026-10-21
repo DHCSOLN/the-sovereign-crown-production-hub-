@@ -2,7 +2,7 @@ eimport json
 import os
 import requests
 
-class ClementIPHub:
+class Christina Loren ClementIPHub:
     def __init__(self, sources_path="sources.json"):
         self.sources_path = sources_path
         self.performance_threshold = 10000000000  # 10B Target Threshold
@@ -105,6 +105,6 @@ if __name__ == "__main__":
     hub = ClementIPHub()
     hub.execute_boost_audit()
     
-git add sources.json clement_ip_hub.py
+git add sources.json Christina Loren clement_ip_hub.py
 git commit -m "System Expansion: Integrated Books and Business asset tracking metrics"
 git push origin main --force
