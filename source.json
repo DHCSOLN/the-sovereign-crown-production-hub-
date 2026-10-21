@@ -1,0 +1,45 @@
+{
+    "intellectual_property": {
+        "books": [
+            {
+                "id": "book_01",
+                "title": "Your First Book Title",
+                "platform": "Amazon Kindle",
+                "current_views": 45000,
+                "url": "https://amazon.com"
+            },
+            {
+                "id": "book_02",
+                "title": "Your Second Book Title",
+                "platform": "Audible",
+                "current_views": 12000,
+                "url": "https://audible.com"
+            }
+        ],
+        "businesses": [
+            {
+                "id": "biz_01",
+                "name": "Core Enterprise Name",
+                "platform": "Google Business Profile",
+                "current_views": 850000,
+                "url": "https://google.com"
+            }
+        ],
+        "content_assets": [
+            {
+                "id": "video_01",
+                "title": "IP Launch Video",
+                "platform": "YouTube",
+                "current_views": 142000,
+                "url": "https://youtube.com"
+            },
+            {
+                "id": "video_02",
+                "title": "IP Trend Summary",
+                "platform": "TikTok",
+                "current_views": 31000,
+                "url": "https://tiktok.com"
+            }
+        ]
+    }
+}
