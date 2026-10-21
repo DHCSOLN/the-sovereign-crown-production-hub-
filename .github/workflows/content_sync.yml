@@ -1,0 +1,66 @@
+name: Automated Performance Monitor & Boost Generator
+
+on:
+  push:
+    branches: [ "main" ]
+  schedule:
+    - cron: '0 0 * * *' # Automatically runs every night at midnight
+
+permissions:
+  contents: write
+
+jobs:
+  audit_and_boost:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python Environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Align and Pull Remote State
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@://github.com"
+          git fetch origin main
+          git reset --hard origin/main
+
+      - name: Execute Boost Analysis
+        env:
+          SOCIAL_ANALYTICS_API_KEY: ${{ secrets.SOCIAL_ANALYTICS_API_KEY }}
+        run: |
+          python clement_ip_hub.py
+
+      - name: Commit and Push Updated Boost Metrics
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Automation Engine: Updated boost templates for underperforming platforms"
+          push_options: '--force'
+
+      # NEW STEP: Forces the worker to dump the text results into GitHub's email log alert system
+      - name: Print Calculated Copy to GitHub Email Logs
+        run: |
+          echo "=================================================="
+          echo "🚨 CLEMENT IP HUB: RE-CROSS PROMOTION GENERATION LOG 🚨"
+          echo "=================================================="
+          python -c "
+          import json, os
+          if os.path.exists('sources.json'):
+              with open('sources.json', 'r') as f:
+                  data = json.load(f)
+              for asset in data.get('content_assets', []):
+                  copy = asset.get('active_boost_copy', '')
+                  if copy and copy != 'Target channel receiving traffic.':
+                      print(f'\n📢 COPY TO PASTE ON {asset[\"platform\"].upper()}:\n')
+                      print(copy)
+                      print('-'*40)
+          "
+          echo "=================================================="
