@@ -6,7 +6,7 @@ on:
     branches:
       - main
     paths:
-      - "bible"
+      - "bible" 
       - "build_bpm_application.py"
       - "markdownall"
       - "The_Sovereign_Crown_Master.txt"
