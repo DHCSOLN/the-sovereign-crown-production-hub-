@@ -1,0 +1,65 @@
+name: SOLN Expanded Quality Framework
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 9 * * 1"
+  push:
+    branches:
+      - main
+    paths:
+      - "SOLN_expanded_quality_framework.py"
+      - ".github/workflows/soln-expanded-quality.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: soln-expanded-quality
+  cancel-in-progress: false
+
+jobs:
+  map-expanded-quality:
+    name: Map SOLN expanded institutional quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate framework
+        run: python -m py_compile SOLN_expanded_quality_framework.py
+
+      - name: Run SOLN expanded quality mapping
+        run: |
+          python SOLN_expanded_quality_framework.py \
+            --site "https://stateoflocnation.com" \
+            --max-pages 250 \
+            --delay 0.15 \
+            --output soln_quality_output
+
+      - name: Verify reports
+        run: |
+          test -s soln_quality_output/SOLN_EXPANDED_QUALITY_REPORT.md
+          test -s soln_quality_output/soln-expanded-quality.json
+          test -s soln_quality_output/soln-page-action-register.csv
+          test -s soln_quality_output/soln-authority-panels.json
+
+      - name: Publish run summary
+        run: |
+          cat soln_quality_output/SOLN_EXPANDED_QUALITY_REPORT.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload SOLN expanded quality reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: SOLN-expanded-quality-reports
+          path: soln_quality_output/
+          if-no-files-found: error
+          retention-days: 90
+        Add SOLN Expanded Quality Framework
