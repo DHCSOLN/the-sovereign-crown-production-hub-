@@ -14,22 +14,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 0
 
       - name: Setup Python Environment
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.3.0
         with:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: pip install requests
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
 
       - name: Align and Pull Remote State
         run: |
           git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@://github.com"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git fetch origin main
           git reset --hard origin/main
 
@@ -45,7 +47,6 @@ jobs:
           commit_message: "Automation Engine: Updated boost templates for underperforming platforms"
           push_options: '--force'
 
-      # NEW STEP: Forces the worker to dump the text results into GitHub's email log alert system
       - name: Print Calculated Copy to GitHub Email Logs
         run: |
           echo "=================================================="
@@ -56,17 +57,14 @@ jobs:
           if os.path.exists('sources.json'):
               with open('sources.json', 'r') as f:
                   data = json.load(f)
-              for asset in data.get('content_assets', []):
-                  copy = asset.get('active_boost_copy', '')
-                  if copy and copy != 'Target channel receiving traffic.':
-                      print(f'\n📢 COPY TO PASTE ON {asset[\"platform\"].upper()}:\n')
-                      print(copy)
-                      print('-'*40)
+              portfolio = data.get('intellectual_property', {})
+              for cat in ['books', 'businesses', 'content_assets']:
+                  for asset in portfolio.get(cat, []):
+                      copy = asset.get('active_boost_copy', '')
+                      if copy:
+                          name_str = asset.get('name', asset.get('title', 'Asset')).upper()
+                          print(f'\n📢 COPY TO PASTE FOR {name_str} ({cat.upper()}):')
+                          print(copy)
+                          print('-'*40)
           "
           echo "=================================================="
-    steps:
-      - name: Checkout Repository Code
-        uses: actions/checkout@v4.2.2 # Pin to latest minor version
-
-      - name: Setup Python Environment
-        uses: actions/setup-python@v5.3.0 # Pin to latest minor version
