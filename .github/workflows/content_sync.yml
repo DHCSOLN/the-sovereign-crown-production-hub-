@@ -64,3 +64,9 @@ jobs:
                       print('-'*40)
           "
           echo "=================================================="
+    steps:
+      - name: Checkout Repository Code
+        uses: actions/checkout@v4.2.2 # Pin to latest minor version
+
+      - name: Setup Python Environment
+        uses: actions/setup-python@v5.3.0 # Pin to latest minor version
