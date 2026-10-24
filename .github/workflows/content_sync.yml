@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "main" ]
   schedule:
-    - cron: '0 0 * * *' # Automatically runs every night at midnight
+    - cron: '0 0 * * *'
 
 permissions:
   contents: write
@@ -52,23 +52,5 @@ jobs:
           echo "=================================================="
           echo "🚨 CLEMENT IP HUB: RE-CROSS PROMOTION GENERATION LOG 🚨"
           echo "=================================================="
-          python -c "
-          import json, os
-          if os.path.exists('sources.json'):
-              with open('sources.json', 'r') as f:
-                  data = json.load(f)
-              portfolio = data.get('intellectual_property', {})
-              for cat in ['books', 'businesses', 'content_assets']:
-                  for asset in portfolio.get(cat, []):
-                      copy = asset.get('active_boost_copy', '')
-                      if copy:
-                          name_str = asset.get('name', asset.get('title', 'Asset')).upper()
-                          print(f'\n📢 COPY TO PASTE FOR {name_str} ({cat.upper()}):')
-                          print(copy)
-                          print('-'*40)
-          "
+          cat sources.json || echo "sources.json not found"
           echo "=================================================="
-          git add .github/workflows/content_sync.yml
-git commit -m "System Synchronization: Aligned log print script framework to multi-category matrix layout"
-git push origin main --force
-
